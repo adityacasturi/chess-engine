@@ -15,7 +15,7 @@ add_library(engine_core
 )
 target_include_directories(engine_core PUBLIC src)
 target_compile_options(engine_core PRIVATE
-  $<$<AND:$<CONFIG:Release>,$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>>:-march=native>
+  $<$<AND:$<CONFIG:Release>,$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>,$<NOT:$<BOOL:${EMSCRIPTEN}>>>:-march=native>
 )
 
 add_executable(chess_engine
@@ -32,3 +32,21 @@ add_executable(engine_bench
   tests/engine_bench.cpp
 )
 target_link_libraries(engine_bench PRIVATE engine_core)
+
+if(EMSCRIPTEN)
+  add_executable(chess_engine_wasm src/wasm_api.cpp)
+  target_link_libraries(chess_engine_wasm PRIVATE engine_core)
+  set_target_properties(chess_engine_wasm PROPERTIES OUTPUT_NAME chess_engine)
+  target_link_options(chess_engine_wasm PRIVATE
+    "-O3"
+    "-sMODULARIZE=1"
+    "-sEXPORT_NAME=createChessEngine"
+    "-sEXPORTED_FUNCTIONS=['_engine_best_move','_malloc','_free']"
+    "-sEXPORTED_RUNTIME_METHODS=['ccall']"
+    "-sALLOW_MEMORY_GROWTH=1"
+    "-sINITIAL_MEMORY=67108864"
+    "-sENVIRONMENT=web,worker"
+    "-sFILESYSTEM=0"
+    "-sNO_EXIT_RUNTIME=1"
+  )
+endif()

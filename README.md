@@ -1,6 +1,10 @@
 # Custom Chess Engine
 
-A playable chess app with a React frontend, an Express bridge, and a native C++ engine that owns search and engine move selection. The browser uses `chess.js` for instant human move legality, move highlighting, and board updates.
+A playable chess app with a React frontend and a native C++ engine. The public site compiles that engine to WebAssembly and runs it in the browser, so you can play without a server.
+
+Play here: https://adityacasturi.github.io/chess-engine/
+
+Locally, the browser still uses `chess.js` for instant human move legality, move highlighting, and board updates. `npm run dev` can fall back to the Express bridge and native binary if the WASM build is missing.
 
 ## Setup
 

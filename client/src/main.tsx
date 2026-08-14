@@ -8,18 +8,8 @@ import type {
   PieceHandlerArgs,
   SquareHandlerArgs
 } from 'react-chessboard/dist/types';
+import { engineBridge } from './engineBridge';
 import './styles.css';
-
-type EngineResult = {
-  accepted: boolean;
-  fen: string;
-  engineMove: string;
-  status: string;
-  score: number;
-  nodes: number;
-  timeMs: number;
-  error?: string;
-};
 
 type MoveRecord = {
   human: string;
@@ -28,19 +18,6 @@ type MoveRecord = {
 
 const GAME_OVER_STATUSES = new Set(['checkmate', 'stalemate', 'draw']);
 const MATE_SCORE = 100000;
-
-async function postJson<T>(url: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error ?? 'Request failed');
-  }
-  return data;
-}
 
 function statusFor(game: Chess): string {
   if (game.isCheckmate()) return 'checkmate';
@@ -166,7 +143,7 @@ function App() {
       setPending(true);
       setMessage('Engine thinking...');
       try {
-        const result = await postJson<EngineResult>('/api/engine-move', { fen: humanFen, depth });
+        const result = await engineBridge.requestMove(humanFen, depth);
         setLastStats({ score: result.score, nodes: result.nodes, timeMs: result.timeMs });
         applyEngineMove(humanFen, result.engineMove);
         setHistory((current) => {

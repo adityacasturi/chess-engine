@@ -1,6 +1,9 @@
 node_modules/
 dist/
 engine/build/
+engine/build-wasm/
 engine/cmake-build-debug/
+client/public/engine/chess_engine.js
+client/public/engine/chess_engine.wasm
 .idea/
 .DS_Store

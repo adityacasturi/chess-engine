@@ -141,7 +141,7 @@ function App() {
   const requestEngineMove = React.useCallback(
     async (humanFen: string, humanMove: string) => {
       setPending(true);
-      setMessage('Engine thinking...');
+      setMessage(`Engine thinking at depth ${depth}...`);
       try {
         const result = await engineBridge.requestMove(humanFen, depth);
         setLastStats({ score: result.score, nodes: result.nodes, timeMs: result.timeMs });
@@ -334,7 +334,7 @@ function App() {
             id="depth"
             type="range"
             min="1"
-            max="5"
+            max="7"
             value={depth}
             onChange={(event) => setDepth(Number(event.target.value))}
             disabled={pending}

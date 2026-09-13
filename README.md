@@ -4,6 +4,8 @@ A playable chess app with a React frontend and a native C++ engine. The public s
 
 Play here: https://adityacasturi.github.io/chess-engine/
 
+Choose search depths 1–7 using the depth slider. Depths 6 and 7 search further and can take longer, especially in complex positions. The browser engine runs in a Web Worker so the page stays responsive during search.
+
 Locally, the browser still uses `chess.js` for instant human move legality, move highlighting, and board updates. `npm run dev` can fall back to the Express bridge and native binary if the WASM build is missing.
 
 ## Setup

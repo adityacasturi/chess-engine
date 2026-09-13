@@ -69,7 +69,7 @@ const char* engine_best_move(const char* fen, int depth) {
     return out.c_str();
   }
 
-  depth = std::max(1, std::min(5, depth));
+  depth = std::max(1, std::min(7, depth));
   std::string engine_move;
   int score = 0;
   uint64_t nodes = 0;

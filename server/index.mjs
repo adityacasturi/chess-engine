@@ -106,7 +106,7 @@ app.get('/api/health', (_req, res) => {
 
 app.post('/api/engine-move', async (req, res) => {
   const fen = String(req.body?.fen ?? '');
-  const depth = Math.max(1, Math.min(5, Number(req.body?.depth ?? 3)));
+  const depth = Math.max(1, Math.min(7, Number(req.body?.depth ?? 3)));
 
   if (!fen) {
     res.status(400).json({ accepted: false, error: 'FEN is required' });

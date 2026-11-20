@@ -82,11 +82,11 @@ inline int parse_square(const std::string& text, size_t offset) {
   return (rank - '1') * 8 + (file - 'a');
 }
 
-inline void add_move(std::vector<Move>& moves, int from, int to, char promotion = 0) {
+inline void add_move(MoveList& moves, int from, int to, char promotion = 0) {
   moves.push_back(Move{from, to, promotion});
 }
 
-inline void add_promotions(std::vector<Move>& moves, int from, int to) {
+inline void add_promotions(MoveList& moves, int from, int to) {
   add_move(moves, from, to, 'q');
   add_move(moves, from, to, 'r');
   add_move(moves, from, to, 'b');
@@ -134,7 +134,7 @@ inline bool is_valid_move_square(int square) {
 }
 
 std::optional<Move> opening_book_move(const Board& board);
-void order_moves(const Board& board, std::vector<Move>& moves, const Move* hash_move = nullptr);
+void order_moves(const Board& board, MoveList& moves, const Move* hash_move = nullptr);
 bool is_capture_or_promotion(const Board& board, const Move& move);
 uint64_t perft_mutable(Board& board, int depth);
 

@@ -19,6 +19,33 @@ struct Move {
   bool operator==(const Move& other) const;
 };
 
+// Fixed-capacity move list that lives on the stack, so move generation never
+// touches the heap. 256 exceeds the maximum number of moves in any legal
+// chess position (218).
+class MoveList {
+public:
+  static constexpr int kCapacity = 256;
+
+  void push_back(const Move& move) { moves_[size_++] = move; }
+  void clear() { size_ = 0; }
+  void resize(int size) { size_ = size; }
+  int size() const { return size_; }
+  bool empty() const { return size_ == 0; }
+
+  Move& operator[](int index) { return moves_[index]; }
+  const Move& operator[](int index) const { return moves_[index]; }
+  const Move& front() const { return moves_[0]; }
+
+  Move* begin() { return moves_.data(); }
+  Move* end() { return moves_.data() + size_; }
+  const Move* begin() const { return moves_.data(); }
+  const Move* end() const { return moves_.data() + size_; }
+
+private:
+  std::array<Move, kCapacity> moves_;
+  int size_ = 0;
+};
+
 struct SearchStats {
   uint64_t search_nodes = 0;
   uint64_t quiescence_nodes = 0;
@@ -77,8 +104,8 @@ public:
     std::array<char, 6> pieces = {};
     int square_count = 0;
   };
-  std::vector<Move> legal_moves_fast();
-  std::vector<Move> tactical_moves_fast();
+  MoveList legal_moves_fast();
+  MoveList tactical_moves_fast();
   bool make_move_internal(const Move& move, UndoState* undo);
   void unmake_move(const UndoState& undo);
 
@@ -98,8 +125,9 @@ private:
   int white_king_square_ = -1;
   int black_king_square_ = -1;
 
-  std::vector<Move> pseudo_legal_moves() const;
-  std::vector<Move> pseudo_tactical_moves() const;
+  void pseudo_legal_moves(MoveList& moves) const;
+  void pseudo_tactical_moves(MoveList& moves) const;
+  void keep_legal(MoveList& moves);
   int pseudo_mobility(bool white) const;
   bool square_attacked(int square, bool by_white) const;
   int king_square(bool white) const;

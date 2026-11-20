@@ -1,6 +1,7 @@
 #include "engine_internal.hpp"
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cstdint>
 #include <unordered_map>
@@ -184,16 +185,16 @@ bool is_capture_or_promotion(const Board& board, const Move& move) {
          std::abs(file_of(move.to) - file_of(move.from)) == 1;
 }
 
-void order_moves(const Board& board, std::vector<Move>& moves, const Move* hash_move) {
-  std::vector<std::pair<int, Move>> scored;
-  scored.reserve(moves.size());
-  for (const auto& move : moves) {
-    scored.emplace_back(move_order_score(board, move, hash_move), move);
+void order_moves(const Board& board, MoveList& moves, const Move* hash_move) {
+  std::array<std::pair<int, Move>, MoveList::kCapacity> scored;
+  int count = moves.size();
+  for (int i = 0; i < count; ++i) {
+    scored[i] = {move_order_score(board, moves[i], hash_move), moves[i]};
   }
-  std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
+  std::sort(scored.begin(), scored.begin() + count, [](const auto& a, const auto& b) {
     return a.first > b.first;
   });
-  for (size_t i = 0; i < scored.size(); ++i) {
+  for (int i = 0; i < count; ++i) {
     moves[i] = scored[i].second;
   }
 }

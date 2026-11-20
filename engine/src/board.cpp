@@ -132,16 +132,74 @@ uint64_t Board::hash_key() const {
   return key;
 }
 
-std::vector<Move> Board::pseudo_legal_moves() const {
-  std::vector<Move> moves;
-  moves.reserve(64);
+namespace {
+
+// Attack tables built once at startup. Each entry lists target squares in the
+// same order the old offset loops visited them, so move order is unchanged.
+struct SquareList {
+  uint8_t count = 0;
+  std::array<uint8_t, 8> squares = {};
+};
+
+// Ray directions: 0-3 are diagonals, 4-7 are orthogonals.
+constexpr std::array<std::pair<int, int>, 8> kRayDirs = {{{1, 1}, {1, -1}, {-1, 1}, {-1, -1},
+                                                         {1, 0}, {-1, 0}, {0, 1}, {0, -1}}};
+constexpr int kFirstDiagonal = 0;
+constexpr int kFirstOrthogonal = 4;
+
+struct AttackTables {
+  std::array<SquareList, 64> knight;
+  std::array<SquareList, 64> king;
+  std::array<std::array<SquareList, 64>, 2> pawn;  // [white ? 0 : 1][square]
+  std::array<std::array<SquareList, 8>, 64> ray;   // squares outward from a square, nearest first
+};
+
+AttackTables build_attack_tables() {
+  AttackTables t;
+  auto add = [](SquareList& list, int file, int rank) {
+    if (file < 0 || file > 7 || rank < 0 || rank > 7) return;
+    list.squares[list.count++] = static_cast<uint8_t>(rank * 8 + file);
+  };
+  constexpr std::array<std::pair<int, int>, 8> jumps = {{{1, 2}, {2, 1}, {2, -1}, {1, -2},
+                                                        {-1, -2}, {-2, -1}, {-2, 1}, {-1, 2}}};
+  for (int sq = 0; sq < 64; ++sq) {
+    int file = detail::file_of(sq);
+    int rank = detail::rank_of(sq);
+    for (auto [df, dr] : jumps) add(t.knight[sq], file + df, rank + dr);
+    for (int df = -1; df <= 1; ++df) {
+      for (int dr = -1; dr <= 1; ++dr) {
+        if (df != 0 || dr != 0) add(t.king[sq], file + df, rank + dr);
+      }
+    }
+    add(t.pawn[0][sq], file - 1, rank + 1);  // white: +7, +9
+    add(t.pawn[0][sq], file + 1, rank + 1);
+    add(t.pawn[1][sq], file - 1, rank - 1);  // black: -9, -7
+    add(t.pawn[1][sq], file + 1, rank - 1);
+    for (int d = 0; d < 8; ++d) {
+      auto [df, dr] = kRayDirs[d];
+      for (int f = file + df, r = rank + dr; f >= 0 && f <= 7 && r >= 0 && r <= 7; f += df, r += dr) {
+        add(t.ray[sq][d], f, r);
+      }
+    }
+  }
+  return t;
+}
+
+const AttackTables kAttacks = build_attack_tables();
+
+inline bool is_king(char piece) {
+  return piece == 'K' || piece == 'k';
+}
+
+} // namespace
+
+void Board::pseudo_legal_moves(MoveList& moves) const {
   bool white = white_to_move_;
 
   for (int from = 0; from < 64; ++from) {
     char piece = squares_[from];
     if (!detail::same_color(piece, white)) continue;
 
-    int file = detail::file_of(from);
     int rank = detail::rank_of(from);
     char kind = static_cast<char>(std::tolower(static_cast<unsigned char>(piece)));
 
@@ -156,19 +214,16 @@ std::vector<Move> Board::pseudo_legal_moves() const {
         } else {
           detail::add_move(moves, from, one);
           int two = from + 2 * forward;
-          if (rank == start_rank && detail::on_board(two) && squares_[two] == '.') {
+          if (rank == start_rank && squares_[two] == '.') {
             detail::add_move(moves, from, two);
           }
         }
       }
 
-      const std::array<int, 2> capture_offsets = white ? std::array<int, 2>{7, 9}
-                                                       : std::array<int, 2>{-9, -7};
-      for (int offset : capture_offsets) {
-        int to = from + offset;
-        if (!detail::on_board(to) || std::abs(detail::file_of(to) - file) != 1) continue;
-        if (detail::enemy_color(squares_[to], white) &&
-            std::tolower(static_cast<unsigned char>(squares_[to])) != 'k') {
+      const SquareList& captures = kAttacks.pawn[white ? 0 : 1][from];
+      for (int i = 0; i < captures.count; ++i) {
+        int to = captures.squares[i];
+        if (detail::enemy_color(squares_[to], white) && !is_king(squares_[to])) {
           if (rank == promotion_rank) {
             detail::add_promotions(moves, from, to);
           } else {
@@ -181,63 +236,15 @@ std::vector<Move> Board::pseudo_legal_moves() const {
       continue;
     }
 
-    if (kind == 'n') {
-      const std::array<std::pair<int, int>, 8> jumps = {{{1, 2}, {2, 1}, {2, -1}, {1, -2},
-                                                        {-1, -2}, {-2, -1}, {-2, 1}, {-1, 2}}};
-      for (auto [df, dr] : jumps) {
-        int nf = file + df;
-        int nr = rank + dr;
-        if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
-        int to = nr * 8 + nf;
-        if (!detail::same_color(squares_[to], white) &&
-            std::tolower(static_cast<unsigned char>(squares_[to])) != 'k') {
+    if (kind == 'n' || kind == 'k') {
+      const SquareList& targets = kind == 'n' ? kAttacks.knight[from] : kAttacks.king[from];
+      for (int i = 0; i < targets.count; ++i) {
+        int to = targets.squares[i];
+        if (!detail::same_color(squares_[to], white) && !is_king(squares_[to])) {
           detail::add_move(moves, from, to);
         }
       }
-      continue;
-    }
-
-    if (kind == 'b' || kind == 'r' || kind == 'q') {
-      constexpr std::array<std::pair<int, int>, 4> bishop_dirs = {
-          std::pair<int, int>{1, 1}, std::pair<int, int>{1, -1},
-          std::pair<int, int>{-1, 1}, std::pair<int, int>{-1, -1}};
-      constexpr std::array<std::pair<int, int>, 4> rook_dirs = {
-          std::pair<int, int>{1, 0}, std::pair<int, int>{-1, 0},
-          std::pair<int, int>{0, 1}, std::pair<int, int>{0, -1}};
-      auto add_sliding = [&](const auto& dirs) {
-        for (auto [df, dr] : dirs) {
-          int nf = file + df;
-          int nr = rank + dr;
-          while (nf >= 0 && nf <= 7 && nr >= 0 && nr <= 7) {
-            int to = nr * 8 + nf;
-            if (detail::same_color(squares_[to], white)) break;
-            if (std::tolower(static_cast<unsigned char>(squares_[to])) == 'k') break;
-            detail::add_move(moves, from, to);
-            if (detail::enemy_color(squares_[to], white)) break;
-            nf += df;
-            nr += dr;
-          }
-        }
-      };
-      if (kind == 'b' || kind == 'q') add_sliding(bishop_dirs);
-      if (kind == 'r' || kind == 'q') add_sliding(rook_dirs);
-      continue;
-    }
-
-    if (kind == 'k') {
-      for (int df = -1; df <= 1; ++df) {
-        for (int dr = -1; dr <= 1; ++dr) {
-          if (df == 0 && dr == 0) continue;
-          int nf = file + df;
-          int nr = rank + dr;
-          if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
-          int to = nr * 8 + nf;
-          if (!detail::same_color(squares_[to], white) &&
-              std::tolower(static_cast<unsigned char>(squares_[to])) != 'k') {
-            detail::add_move(moves, from, to);
-          }
-        }
-      }
+      if (kind == 'n') continue;
 
       if (white && from == 4 && !in_check(true)) {
         if (castle_white_king_ && squares_[5] == '.' && squares_[6] == '.' && squares_[7] == 'R' &&
@@ -259,22 +266,38 @@ std::vector<Move> Board::pseudo_legal_moves() const {
           detail::add_move(moves, 60, 58);
         }
       }
+      continue;
+    }
+
+    if (kind == 'b' || kind == 'r' || kind == 'q') {
+      int first_dir = kind == 'r' ? kFirstOrthogonal : kFirstDiagonal;
+      int last_dir = kind == 'b' ? kFirstOrthogonal : 8;
+      for (int d = first_dir; d < last_dir; ++d) {
+        const SquareList& ray = kAttacks.ray[from][d];
+        for (int i = 0; i < ray.count; ++i) {
+          int to = ray.squares[i];
+          char target = squares_[to];
+          if (target == '.') {
+            detail::add_move(moves, from, to);
+            continue;
+          }
+          if (detail::enemy_color(target, white) && !is_king(target)) {
+            detail::add_move(moves, from, to);
+          }
+          break;
+        }
+      }
     }
   }
-
-  return moves;
 }
 
-std::vector<Move> Board::pseudo_tactical_moves() const {
-  std::vector<Move> moves;
-  moves.reserve(32);
+void Board::pseudo_tactical_moves(MoveList& moves) const {
   bool white = white_to_move_;
 
   for (int from = 0; from < 64; ++from) {
     char piece = squares_[from];
     if (!detail::same_color(piece, white)) continue;
 
-    int file = detail::file_of(from);
     int rank = detail::rank_of(from);
     char kind = static_cast<char>(std::tolower(static_cast<unsigned char>(piece)));
 
@@ -286,13 +309,10 @@ std::vector<Move> Board::pseudo_tactical_moves() const {
         detail::add_promotions(moves, from, one);
       }
 
-      const std::array<int, 2> capture_offsets = white ? std::array<int, 2>{7, 9}
-                                                       : std::array<int, 2>{-9, -7};
-      for (int offset : capture_offsets) {
-        int to = from + offset;
-        if (!detail::on_board(to) || std::abs(detail::file_of(to) - file) != 1) continue;
-        if (detail::enemy_color(squares_[to], white) &&
-            std::tolower(static_cast<unsigned char>(squares_[to])) != 'k') {
+      const SquareList& captures = kAttacks.pawn[white ? 0 : 1][from];
+      for (int i = 0; i < captures.count; ++i) {
+        int to = captures.squares[i];
+        if (detail::enemy_color(squares_[to], white) && !is_king(squares_[to])) {
           if (rank == promotion_rank) {
             detail::add_promotions(moves, from, to);
           } else {
@@ -305,16 +325,11 @@ std::vector<Move> Board::pseudo_tactical_moves() const {
       continue;
     }
 
-    if (kind == 'n') {
-      const std::array<std::pair<int, int>, 8> jumps = {{{1, 2}, {2, 1}, {2, -1}, {1, -2},
-                                                        {-1, -2}, {-2, -1}, {-2, 1}, {-1, 2}}};
-      for (auto [df, dr] : jumps) {
-        int nf = file + df;
-        int nr = rank + dr;
-        if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
-        int to = nr * 8 + nf;
-        if (detail::enemy_color(squares_[to], white) &&
-            std::tolower(static_cast<unsigned char>(squares_[to])) != 'k') {
+    if (kind == 'n' || kind == 'k') {
+      const SquareList& targets = kind == 'n' ? kAttacks.knight[from] : kAttacks.king[from];
+      for (int i = 0; i < targets.count; ++i) {
+        int to = targets.squares[i];
+        if (detail::enemy_color(squares_[to], white) && !is_king(squares_[to])) {
           detail::add_move(moves, from, to);
         }
       }
@@ -322,92 +337,54 @@ std::vector<Move> Board::pseudo_tactical_moves() const {
     }
 
     if (kind == 'b' || kind == 'r' || kind == 'q') {
-      constexpr std::array<std::pair<int, int>, 4> bishop_dirs = {
-          std::pair<int, int>{1, 1}, std::pair<int, int>{1, -1},
-          std::pair<int, int>{-1, 1}, std::pair<int, int>{-1, -1}};
-      constexpr std::array<std::pair<int, int>, 4> rook_dirs = {
-          std::pair<int, int>{1, 0}, std::pair<int, int>{-1, 0},
-          std::pair<int, int>{0, 1}, std::pair<int, int>{0, -1}};
-      auto add_sliding_captures = [&](const auto& dirs) {
-        for (auto [df, dr] : dirs) {
-          int nf = file + df;
-          int nr = rank + dr;
-          while (nf >= 0 && nf <= 7 && nr >= 0 && nr <= 7) {
-            int to = nr * 8 + nf;
-            if (squares_[to] != '.') {
-              if (detail::enemy_color(squares_[to], white) &&
-                  std::tolower(static_cast<unsigned char>(squares_[to])) != 'k') {
-                detail::add_move(moves, from, to);
-              }
-              break;
-            }
-            nf += df;
-            nr += dr;
+      int first_dir = kind == 'r' ? kFirstOrthogonal : kFirstDiagonal;
+      int last_dir = kind == 'b' ? kFirstOrthogonal : 8;
+      for (int d = first_dir; d < last_dir; ++d) {
+        const SquareList& ray = kAttacks.ray[from][d];
+        for (int i = 0; i < ray.count; ++i) {
+          char target = squares_[ray.squares[i]];
+          if (target == '.') continue;
+          if (detail::enemy_color(target, white) && !is_king(target)) {
+            detail::add_move(moves, from, ray.squares[i]);
           }
-        }
-      };
-      if (kind == 'b' || kind == 'q') add_sliding_captures(bishop_dirs);
-      if (kind == 'r' || kind == 'q') add_sliding_captures(rook_dirs);
-      continue;
-    }
-
-    if (kind == 'k') {
-      for (int df = -1; df <= 1; ++df) {
-        for (int dr = -1; dr <= 1; ++dr) {
-          if (df == 0 && dr == 0) continue;
-          int nf = file + df;
-          int nr = rank + dr;
-          if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
-          int to = nr * 8 + nf;
-          if (detail::enemy_color(squares_[to], white) &&
-              std::tolower(static_cast<unsigned char>(squares_[to])) != 'k') {
-            detail::add_move(moves, from, to);
-          }
+          break;
         }
       }
     }
   }
-
-  return moves;
 }
 
 std::vector<Move> Board::legal_moves() const {
   Board copy = *this;
-  return copy.legal_moves_fast();
+  MoveList moves = copy.legal_moves_fast();
+  return std::vector<Move>(moves.begin(), moves.end());
 }
 
-std::vector<Move> Board::legal_moves_fast() {
-  std::vector<Move> legal;
-  legal.reserve(64);
+void Board::keep_legal(MoveList& moves) {
   bool us = white_to_move_;
-  for (const auto& move : pseudo_legal_moves()) {
+  int kept = 0;
+  for (int i = 0; i < moves.size(); ++i) {
     UndoState undo;
-    bool made = make_move_internal(move, &undo);
-    if (made && !in_check(us)) {
-      legal.push_back(move);
-    }
-    if (made) {
-      unmake_move(undo);
-    }
+    if (!make_move_internal(moves[i], &undo)) continue;
+    bool legal = !in_check(us);
+    unmake_move(undo);
+    if (legal) moves[kept++] = moves[i];
   }
-  return legal;
+  moves.resize(kept);
 }
 
-std::vector<Move> Board::tactical_moves_fast() {
-  std::vector<Move> legal;
-  legal.reserve(32);
-  bool us = white_to_move_;
-  for (const auto& move : pseudo_tactical_moves()) {
-    UndoState undo;
-    bool made = make_move_internal(move, &undo);
-    if (made && !in_check(us)) {
-      legal.push_back(move);
-    }
-    if (made) {
-      unmake_move(undo);
-    }
-  }
-  return legal;
+MoveList Board::legal_moves_fast() {
+  MoveList moves;
+  pseudo_legal_moves(moves);
+  keep_legal(moves);
+  return moves;
+}
+
+MoveList Board::tactical_moves_fast() {
+  MoveList moves;
+  pseudo_tactical_moves(moves);
+  keep_legal(moves);
+  return moves;
 }
 
 bool Board::is_legal(const Move& move) const {
@@ -542,47 +519,37 @@ int Board::king_square(bool white) const {
 }
 
 bool Board::square_attacked(int square, bool by_white) const {
-  int file = detail::file_of(square);
-  if (by_white) {
-    if (file < 7 && detail::on_board(square - 7) && squares_[square - 7] == 'P') return true;
-    if (file > 0 && detail::on_board(square - 9) && squares_[square - 9] == 'P') return true;
-  } else {
-    if (file > 0 && detail::on_board(square + 7) && squares_[square + 7] == 'p') return true;
-    if (file < 7 && detail::on_board(square + 9) && squares_[square + 9] == 'p') return true;
+  // A pawn of the attacking side attacks `square` exactly when a defending
+  // pawn on `square` would attack the pawn's square.
+  const SquareList& pawn_sources = kAttacks.pawn[by_white ? 1 : 0][square];
+  char pawn = by_white ? 'P' : 'p';
+  for (int i = 0; i < pawn_sources.count; ++i) {
+    if (squares_[pawn_sources.squares[i]] == pawn) return true;
   }
 
-  const std::array<std::pair<int, int>, 8> knights = {{{1, 2}, {2, 1}, {2, -1}, {1, -2},
-                                                      {-1, -2}, {-2, -1}, {-2, 1}, {-1, 2}}};
-  for (auto [df, dr] : knights) {
-    int nf = file + df;
-    int nr = detail::rank_of(square) + dr;
-    if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
-    char p = squares_[nr * 8 + nf];
-    if (p == (by_white ? 'N' : 'n')) return true;
+  char knight = by_white ? 'N' : 'n';
+  const SquareList& knights = kAttacks.knight[square];
+  for (int i = 0; i < knights.count; ++i) {
+    if (squares_[knights.squares[i]] == knight) return true;
   }
 
-  const std::array<std::pair<int, int>, 8> dirs = {{{1, 0}, {-1, 0}, {0, 1}, {0, -1},
-                                                   {1, 1}, {1, -1}, {-1, 1}, {-1, -1}}};
-  for (auto [df, dr] : dirs) {
-    int nf = file + df;
-    int nr = detail::rank_of(square) + dr;
-    int distance = 1;
-    while (nf >= 0 && nf <= 7 && nr >= 0 && nr <= 7) {
-      char p = squares_[nr * 8 + nf];
-      if (p != '.') {
-        if (detail::same_color(p, by_white)) {
-          char kind = static_cast<char>(std::tolower(static_cast<unsigned char>(p)));
-          bool diagonal = df != 0 && dr != 0;
-          bool straight = df == 0 || dr == 0;
-          if (distance == 1 && kind == 'k') return true;
-          if (diagonal && (kind == 'b' || kind == 'q')) return true;
-          if (straight && (kind == 'r' || kind == 'q')) return true;
-        }
-        break;
-      }
-      nf += df;
-      nr += dr;
-      distance++;
+  char king = by_white ? 'K' : 'k';
+  const SquareList& kings = kAttacks.king[square];
+  for (int i = 0; i < kings.count; ++i) {
+    if (squares_[kings.squares[i]] == king) return true;
+  }
+
+  char queen = by_white ? 'Q' : 'q';
+  char bishop = by_white ? 'B' : 'b';
+  char rook = by_white ? 'R' : 'r';
+  for (int d = 0; d < 8; ++d) {
+    char slider = d < kFirstOrthogonal ? bishop : rook;
+    const SquareList& ray = kAttacks.ray[square][d];
+    for (int i = 0; i < ray.count; ++i) {
+      char p = squares_[ray.squares[i]];
+      if (p == '.') continue;
+      if (p == slider || p == queen) return true;
+      break;
     }
   }
 
